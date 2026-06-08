@@ -2,3 +2,5 @@ customtkinter
 Pillow
 requests
 gdown
+opencv-python
+imageio-ffmpeg
