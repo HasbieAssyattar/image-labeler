@@ -1,4 +1,4 @@
-# Media Labeler
+# Media Labeler v3.0
 
 A desktop application built with Python and CustomTkinter for labeling images and videos. This tool supports local datasets and Google Drive integration.
 

@@ -208,7 +208,8 @@ class DataLabelerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.title("Image Labeler Cloud")
+        self.VERSION = "3.0"
+        self.title(f"Media Labeler v{self.VERSION}")
         self.geometry("1250x850")
         
         self.manager = ImageManager()
