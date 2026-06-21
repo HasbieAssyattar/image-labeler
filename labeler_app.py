@@ -208,7 +208,7 @@ class DataLabelerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        self.VERSION = "3.0"
+        self.VERSION = "3.1"
         self.title(f"Media Labeler v{self.VERSION}")
         self.geometry("1250x850")
         
