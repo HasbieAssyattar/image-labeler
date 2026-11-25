@@ -24,9 +24,27 @@ except ImportError:
 
 HAS_FFPY = False # Disabling due to build issues on Python 3.14
 
-# Set appearance and theme
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+# ── Colour Palette ─────────────────────────────────────────────────────────────
+CREAM_BG      = "#F5EFE6"   # Background utama
+CREAM_DARK    = "#E8DCC8"   # Card / hover ringan
+CREAM_MEDIUM  = "#DDD0B8"   # Border, divider
+BROWN_LIGHT   = "#C4A882"   # Aksen, border, button secondary
+BROWN_MID     = "#8B6343"   # Button primer, highlight
+BROWN_DARK    = "#5C3D2E"   # Text header, tab aktif
+BROWN_DEEP    = "#3B2217"   # Sidebar background
+WARM_WHITE    = "#FAF7F2"   # Canvas area
+TEXT_PRIMARY  = "#3B2217"   # Teks utama
+TEXT_MUTED    = "#8B6343"   # Teks secondary/hint
+TEXT_ON_DARK  = "#F0E6D4"   # Teks di atas sidebar gelap
+TEXT_DIM_DARK = "#A08060"   # Teks muted di sidebar gelap
+ACCENT_GREEN  = "#5B8A4A"   # GDrive button
+ACCENT_GREEN_H= "#4A7339"   # GDrive hover
+SASH_COLOR    = "#8B6343"   # PanedWindow sash
+
+# ── CustomTkinter global setup ─────────────────────────────────────────────────
+ctk.set_appearance_mode("Light")
+ctk.set_default_color_theme("green")  # Closest neutral, will be overridden
+
 
 class ImageManager:
     def __init__(self, source_dir=None, target_dir=None):
@@ -81,7 +99,6 @@ class ImageManager:
     def fetch_gdrive_files(self, folder_url):
         """Attempts to list files from a public GDrive folder using improved scraping."""
         try:
-            # Extract folder ID using more flexible regex
             folder_id = None
             id_patterns = [
                 r'folders/([a-zA-Z0-9-_]+)',
@@ -97,33 +114,21 @@ class ImageManager:
             if not folder_id:
                 return False, "Invalid Folder Link or ID."
 
-            # Headers to mimic a real browser
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
             }
 
-            # Use the main folder view which often contains a JSON blob of files
             view_url = f"https://drive.google.com/drive/folders/{folder_id}"
             response = requests.get(view_url, headers=headers, timeout=15)
             
-            # Look for the JSON data block that contains file info
-            # We look for file IDs (usually 33 chars) and filenames
-            # This regex is designed to find file entries in the initial data blob
             raw_data = response.text
-            
-            # Pattern for finding [file_id, filename, mimetype, ...]
-            # We specifically target images
             found_files = []
             
-            # Strategy 2: Look for the 'embeddedfolderview' if main fails
             if "window['_initialData']" not in raw_data:
                 view_url = f"https://drive.google.com/embeddedfolderview?id={folder_id}"
                 response = requests.get(view_url, headers=headers, timeout=15)
                 raw_data = response.text
 
-            # Extracting file IDs and Names
-            # Strategy 1: GDrive JS data structure (common in main view)
-            # Pattern: ["ID", "Name", ... "image/...]
             matches = re.finditer(r'\["([a-zA-Z0-9-_]{25,})","([^"]+)"', raw_data)
             seen_ids = set()
             valid_exts = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.mp4', '.avi', '.mov', '.mkv']
@@ -134,8 +139,6 @@ class ImageManager:
                         found_files.append((fname, fid, True))
                         seen_ids.add(fid)
 
-            # Strategy 2: HTML structure (common in embedded view)
-            # Pattern: <div class="flip-entry" id="entry-ID"> ... <div class="flip-entry-title">NAME</div>
             if not found_files:
                 html_matches = re.finditer(r'id="entry-([a-zA-Z0-9-_]{25,})".*?class="flip-entry-title">([^<]+)</div>', raw_data, re.DOTALL)
                 for m in html_matches:
@@ -175,11 +178,9 @@ class ImageManager:
 
         try:
             if is_cloud:
-                # Download from GDrive
                 url = f"https://drive.google.com/uc?id={path_id}"
                 gdown.download(url, dst, quiet=True)
             else:
-                # Local move
                 shutil.move(path_id, dst)
             
             self.images.pop(self.current_index)
@@ -204,13 +205,15 @@ class ImageManager:
             return True
         return False
 
+
 class DataLabelerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
         self.VERSION = "3.1"
         self.title(f"Media Labeler v{self.VERSION}")
-        self.geometry("1250x850")
+        self.geometry("1280x860")
+        self.configure(fg_color=CREAM_BG)
         
         self.manager = ImageManager()
         self.current_video_cap = None
@@ -234,173 +237,376 @@ class DataLabelerApp(ctk.CTk):
         self.bind("<Right>", lambda e: self.on_classify("next"))
 
     def stop_video(self):
-        # 1. Signal stop
         self.video_playing = False
         
-        # 2. Wait a moment for thread to see the signal or use lock
         with self.cap_lock:
             if self.current_video_cap:
                 self.current_video_cap.release()
                 self.current_video_cap = None
         
-        # 3. Stop sound
         try: winsound.PlaySound(None, winsound.SND_PURGE)
         except: pass
 
-        # Cleanup temp audio
         if self.temp_audio_file and os.path.exists(self.temp_audio_file):
             try: os.remove(self.temp_audio_file)
             except: pass
             self.temp_audio_file = None
 
+    def _make_sidebar_label(self, parent, text, size=12, weight="normal", color=None):
+        return ctk.CTkLabel(
+            parent, text=text,
+            font=ctk.CTkFont(family="Segoe UI", size=size, weight=weight),
+            text_color=color or TEXT_ON_DARK
+        )
+
+    def _make_sidebar_btn(self, parent, text, command, width=None, height=36,
+                          fg=None, hover=None, text_color=TEXT_ON_DARK, **kw):
+        return ctk.CTkButton(
+            parent, text=text, command=command,
+            width=width or 0, height=height,
+            fg_color=fg or BROWN_MID,
+            hover_color=hover or BROWN_DARK,
+            text_color=text_color,
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            corner_radius=8,
+            **kw
+        )
+
     def setup_ui(self):
-        # Main Paned Container for Resizable Sidebar
-        self.paned = tk.PanedWindow(self, orient=tk.HORIZONTAL, bg="#242424", bd=0, sashwidth=4, sashpad=0)
+        # ── PanedWindow ────────────────────────────────────────────────────────
+        self.paned = tk.PanedWindow(
+            self, orient=tk.HORIZONTAL,
+            bg=SASH_COLOR, bd=0, sashwidth=5, sashpad=0
+        )
         self.paned.pack(fill="both", expand=True)
 
-        # --- Sidebar ---
-        self.sidebar = ctk.CTkFrame(self.paned, width=300, corner_radius=0)
-        # self.sidebar.grid(...) -> We use paned.add instead
-        
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="IMAGE LABELER", font=ctk.CTkFont(size=22, weight="bold"))
-        self.logo_label.pack(pady=(25, 10))
+        # ══════════════════════════════════════════════════════════════════════
+        # SIDEBAR — gelap coklat tua
+        # ══════════════════════════════════════════════════════════════════════
+        self.sidebar = ctk.CTkFrame(
+            self.paned, width=290, corner_radius=0,
+            fg_color=BROWN_DEEP
+        )
 
-        # Tabs for Source Selection
-        self.tabs = ctk.CTkTabview(self.sidebar, height=200)
-        self.tabs.pack(fill="x", padx=10, pady=5)
+        # Logo / Title
+        logo_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        logo_frame.pack(fill="x", padx=20, pady=(24, 8))
+
+        ctk.CTkLabel(
+            logo_frame, text="🏷",
+            font=ctk.CTkFont(size=26),
+            text_color=BROWN_LIGHT
+        ).pack(side="left", padx=(0, 8))
+
+        ctk.CTkLabel(
+            logo_frame, text="LABELER",
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            text_color=TEXT_ON_DARK
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            self.sidebar,
+            text=f"v{self.VERSION}",
+            font=ctk.CTkFont(size=10),
+            text_color=TEXT_DIM_DARK
+        ).pack(anchor="w", padx=20)
+
+        # Divider
+        self._sidebar_divider()
+
+        # ── Source Tabs ────────────────────────────────────────────────────────
+        self._sidebar_section_label("SOURCE")
+
+        self.tabs = ctk.CTkTabview(
+            self.sidebar,
+            fg_color=BROWN_DARK,
+            segmented_button_fg_color=BROWN_DEEP,
+            segmented_button_selected_color=BROWN_MID,
+            segmented_button_selected_hover_color=BROWN_LIGHT,
+            segmented_button_unselected_color=BROWN_DEEP,
+            segmented_button_unselected_hover_color=BROWN_DARK,
+            text_color=TEXT_ON_DARK,
+            text_color_disabled=TEXT_DIM_DARK,
+            border_width=0,
+            height=130,
+        )
+        self.tabs.pack(fill="x", padx=14, pady=(0, 8))
         self.tabs.add("Local")
         self.tabs.add("GDrive")
 
         # Local Tab
-        self.btn_source = ctk.CTkButton(self.tabs.tab("Local"), text="Select Local Folder", command=self.select_source)
-        self.btn_source.pack(fill="x", pady=5)
-        
-        self.source_info_frame = ctk.CTkFrame(self.tabs.tab("Local"), fg_color="transparent")
+        local_tab = self.tabs.tab("Local")
+        self._make_sidebar_btn(
+            local_tab, "📁  Select Local Folder", self.select_source,
+            fg=BROWN_MID, hover=BROWN_DARK
+        ).pack(fill="x", pady=(4, 6))
+
+        self.source_info_frame = ctk.CTkFrame(local_tab, fg_color="transparent")
         self.source_info_frame.pack(fill="x")
-        self.source_lbl = ctk.CTkLabel(self.source_info_frame, text=f"Src: {os.path.basename(self.manager.source_dir)}", font=ctk.CTkFont(size=11), text_color="gray")
-        self.source_lbl.pack(side="left", padx=5)
-        self.btn_open_src = ctk.CTkButton(self.source_info_frame, text="📂", width=30, height=20, command=lambda: self.open_in_explorer(self.manager.source_dir), fg_color="gray30")
-        self.btn_open_src.pack(side="right", padx=5)
+        self.source_lbl = ctk.CTkLabel(
+            self.source_info_frame,
+            text=f"Src: {os.path.basename(self.manager.source_dir)}",
+            font=ctk.CTkFont(size=11), text_color=TEXT_DIM_DARK
+        )
+        self.source_lbl.pack(side="left", padx=4)
+        self._make_sidebar_btn(
+            self.source_info_frame, "📂", lambda: self.open_in_explorer(self.manager.source_dir),
+            width=28, height=22, fg=BROWN_DARK, hover=BROWN_MID
+        ).pack(side="right", padx=4)
 
         # GDrive Tab
-        self.gdrive_entry = ctk.CTkEntry(self.tabs.tab("GDrive"), placeholder_text="Paste Folder Link/ID")
-        self.gdrive_entry.pack(fill="x", pady=5)
-        self.btn_gdrive = ctk.CTkButton(self.tabs.tab("GDrive"), text="Connect GDrive", command=self.connect_gdrive, fg_color="#1db954", hover_color="#19a34a")
-        self.btn_gdrive.pack(fill="x", pady=5)
+        gdrive_tab = self.tabs.tab("GDrive")
+        self.gdrive_entry = ctk.CTkEntry(
+            gdrive_tab,
+            placeholder_text="Paste Folder Link / ID",
+            fg_color=BROWN_DARK, border_color=BROWN_LIGHT, border_width=1,
+            text_color=TEXT_ON_DARK, placeholder_text_color=TEXT_DIM_DARK,
+            corner_radius=8, height=32
+        )
+        self.gdrive_entry.pack(fill="x", pady=(4, 6))
+        self._make_sidebar_btn(
+            gdrive_tab, "🔗  Connect GDrive", self.connect_gdrive,
+            fg=ACCENT_GREEN, hover=ACCENT_GREEN_H
+        ).pack(fill="x")
 
-        # Target Folder
-        self.target_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.target_frame.pack(fill="x", padx=15, pady=5)
-        self.btn_target = ctk.CTkButton(self.target_frame, text="Select Destination", command=self.select_target, fg_color="gray30")
-        self.btn_target.pack(fill="x", pady=5)
-        
-        self.target_info_frame = ctk.CTkFrame(self.target_frame, fg_color="transparent")
-        self.target_info_frame.pack(fill="x")
-        self.target_lbl = ctk.CTkLabel(self.target_info_frame, text=f"Dst: {os.path.basename(self.manager.target_dir)}", font=ctk.CTkFont(size=11), text_color="gray")
-        self.target_lbl.pack(side="left", padx=5)
-        self.btn_open_dst = ctk.CTkButton(self.target_info_frame, text="📂", width=30, height=20, command=lambda: self.open_in_explorer(self.manager.target_dir), fg_color="gray30")
-        self.btn_open_dst.pack(side="right", padx=5)
+        # ── Destination ────────────────────────────────────────────────────────
+        self._sidebar_divider()
+        self._sidebar_section_label("DESTINATION")
 
-        # Categories Toggle
-        self.cat_header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
-        self.cat_header.pack(fill="x", padx=15, pady=(10, 0))
-        self.cat_title = ctk.CTkLabel(self.cat_header, text="CATEGORIES", font=ctk.CTkFont(weight="bold"))
-        self.cat_title.pack(side="left")
-        self.btn_toggle_cat = ctk.CTkButton(self.cat_header, text="▼", width=30, height=20, command=self.toggle_categories, fg_color="transparent")
+        dest_frame = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        dest_frame.pack(fill="x", padx=14, pady=(0, 4))
+
+        self._make_sidebar_btn(
+            dest_frame, "📂  Select Destination", self.select_target,
+            fg=BROWN_DARK, hover=BROWN_MID
+        ).pack(fill="x", pady=(0, 6))
+
+        dst_info = ctk.CTkFrame(dest_frame, fg_color="transparent")
+        dst_info.pack(fill="x")
+        self.target_lbl = ctk.CTkLabel(
+            dst_info,
+            text=f"Dst: {os.path.basename(self.manager.target_dir)}",
+            font=ctk.CTkFont(size=11), text_color=TEXT_DIM_DARK
+        )
+        self.target_lbl.pack(side="left", padx=4)
+        self._make_sidebar_btn(
+            dst_info, "📂", lambda: self.open_in_explorer(self.manager.target_dir),
+            width=28, height=22, fg=BROWN_DARK, hover=BROWN_MID
+        ).pack(side="right", padx=4)
+
+        # ── Categories ─────────────────────────────────────────────────────────
+        self._sidebar_divider()
+
+        cat_header = ctk.CTkFrame(self.sidebar, fg_color="transparent")
+        cat_header.pack(fill="x", padx=14, pady=(0, 4))
+        self._sidebar_section_label("CATEGORIES", parent=cat_header, pack=False).pack(side="left")
+        self.btn_toggle_cat = ctk.CTkButton(
+            cat_header, text="▼", width=26, height=22,
+            fg_color="transparent", hover_color=BROWN_DARK,
+            text_color=TEXT_DIM_DARK, command=self.toggle_categories
+        )
         self.btn_toggle_cat.pack(side="right")
 
-        # Categories
-        self.category_scroll = ctk.CTkScrollableFrame(self.sidebar, label_text="")
-        self.category_scroll.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+        self.category_scroll = ctk.CTkScrollableFrame(
+            self.sidebar,
+            fg_color=BROWN_DEEP,
+            scrollbar_button_color=BROWN_MID,
+            scrollbar_button_hover_color=BROWN_LIGHT,
+            label_text=""
+        )
+        self.category_scroll.pack(fill="both", expand=True, padx=14, pady=(0, 10))
         self.cats_visible = True
         self.create_category_buttons()
-        
-        self.refresh_btn = ctk.CTkButton(self.sidebar, text="Refresh All", command=self.refresh_app, fg_color="transparent", border_width=1)
-        self.refresh_btn.pack(pady=20, padx=20)
-        
+
+        # Refresh button at bottom of sidebar
+        self._sidebar_divider()
+        self._make_sidebar_btn(
+            self.sidebar, "↺  Refresh All", self.refresh_app,
+            fg="transparent", hover=BROWN_DARK,
+            text_color=TEXT_DIM_DARK,
+            border_width=1, border_color=BROWN_DARK
+        ).pack(padx=16, pady=(8, 20), fill="x")
+
         self.paned.add(self.sidebar)
 
-        # --- Right Container (Main + Footer) ---
-        self.right_container = ctk.CTkFrame(self.paned, fg_color="transparent")
+        # ══════════════════════════════════════════════════════════════════════
+        # RIGHT CONTAINER — area konten utama
+        # ══════════════════════════════════════════════════════════════════════
+        self.right_container = ctk.CTkFrame(self.paned, fg_color=CREAM_BG)
         self.paned.add(self.right_container)
-        
-        # --- Sidebar Toggle Button (Floating in Right Container) ---
-        self.btn_toggle_sidebar = ctk.CTkButton(self.right_container, text="☰", width=35, height=35, 
-                                               command=self.toggle_sidebar, fg_color="gray30", hover_color="gray40")
-        self.btn_toggle_sidebar.place(x=10, y=10, anchor="nw")
 
-        # --- Footer (Pack this side=bottom FIRST to ensure visibility) ---
-        self.footer = ctk.CTkFrame(self.right_container, height=100, corner_radius=15)
-        self.footer.pack(fill="x", side="bottom", padx=20, pady=(0, 20))
+        # Sidebar toggle button (floating)
+        self.btn_toggle_sidebar = ctk.CTkButton(
+            self.right_container, text="☰", width=34, height=34,
+            fg_color=CREAM_DARK, hover_color=CREAM_MEDIUM,
+            text_color=BROWN_DARK,
+            corner_radius=8,
+            command=self.toggle_sidebar
+        )
+        self.btn_toggle_sidebar.place(x=12, y=12, anchor="nw")
 
-        # --- Main Content ---
+        # ── Footer / Navigation bar ────────────────────────────────────────────
+        self.footer = ctk.CTkFrame(
+            self.right_container,
+            height=80,
+            corner_radius=14,
+            fg_color=CREAM_DARK,
+            border_width=1,
+            border_color=CREAM_MEDIUM
+        )
+        self.footer.pack(fill="x", side="bottom", padx=18, pady=(0, 16))
+
+        # ── Main content area ──────────────────────────────────────────────────
         self.main_content = ctk.CTkFrame(self.right_container, fg_color="transparent")
-        self.main_content.pack(fill="both", expand=True, side="top", padx=20, pady=(20, 0))
-        
-        self.image_container = ctk.CTkFrame(self.main_content, fg_color="#1a1a1a", corner_radius=15)
-        self.image_container.pack(fill="both", expand=True, padx=10, pady=10)
+        self.main_content.pack(fill="both", expand=True, side="top", padx=18, pady=(16, 0))
+
+        # Image/Video canvas
+        self.image_container = ctk.CTkFrame(
+            self.main_content,
+            fg_color=WARM_WHITE,
+            corner_radius=16,
+            border_width=1,
+            border_color=CREAM_MEDIUM
+        )
+        self.image_container.pack(fill="both", expand=True, padx=4, pady=4)
         self.image_container.update()
-        
-        self.image_label = ctk.CTkLabel(self.image_container, text="Ready to label...", text_color="gray")
+
+        self.image_label = ctk.CTkLabel(
+            self.image_container,
+            text="Select a source folder to start labeling…",
+            font=ctk.CTkFont(family="Segoe UI", size=14),
+            text_color=TEXT_MUTED
+        )
         self.image_label.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # --- Video Controls ---
+
+        # ── Video Controls ─────────────────────────────────────────────────────
         self.video_ctrls = ctk.CTkFrame(self.main_content, fg_color="transparent")
-        self.video_ctrls.pack(fill="x", padx=10)
-        
-        self.video_slider = ctk.CTkSlider(self.video_ctrls, from_=0, to=100, command=self.on_slider_move)
-        self.video_slider.pack(fill="x", side="left", expand=True, padx=(5, 10))
+        self.video_ctrls.pack(fill="x", padx=4, pady=(6, 0))
+
+        self.video_slider = ctk.CTkSlider(
+            self.video_ctrls,
+            from_=0, to=100,
+            command=self.on_slider_move,
+            button_color=BROWN_MID,
+            button_hover_color=BROWN_DARK,
+            progress_color=BROWN_LIGHT,
+            fg_color=CREAM_DARK,
+        )
+        self.video_slider.pack(fill="x", side="left", expand=True, padx=(4, 10))
         self.video_slider.set(0)
-        
-        self.btn_play_pause = ctk.CTkButton(self.video_ctrls, text="⏸", width=40, command=self.toggle_pause, fg_color="gray30")
+
+        self.btn_play_pause = ctk.CTkButton(
+            self.video_ctrls, text="⏸", width=42, height=32,
+            command=self.toggle_pause,
+            fg_color=CREAM_DARK, hover_color=CREAM_MEDIUM,
+            text_color=BROWN_DARK,
+            corner_radius=8
+        )
         self.btn_play_pause.pack(side="right")
-        
+
+        # ── Filename bar ───────────────────────────────────────────────────────
         self.filename_container = ctk.CTkFrame(self.main_content, fg_color="transparent")
-        self.filename_container.pack(fill="x", pady=5)
-        
-        self.filename_label = ctk.CTkLabel(self.filename_container, text="", font=ctk.CTkFont(size=14, weight="bold"))
-        self.filename_label.pack(side="left", expand=True, padx=(40, 0))
-        
-        self.btn_playlist = ctk.CTkButton(self.filename_container, text="📜 List", width=60, height=25, command=self.toggle_media_list, fg_color="gray30", hover_color="gray40")
-        self.btn_playlist.pack(side="right", padx=10)
-        
-        # Move playlist to a better place to avoid push issues
-        self.media_list_container = ctk.CTkScrollableFrame(self.right_container, height=0, label_text="Project Media Playlist")
-        
-        self.loading_progress = ctk.CTkProgressBar(self.main_content, width=400)
-        self.loading_progress.pack(pady=5)
+        self.filename_container.pack(fill="x", pady=(4, 2))
+
+        self.filename_label = ctk.CTkLabel(
+            self.filename_container, text="",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color=BROWN_DARK
+        )
+        self.filename_label.pack(side="left", expand=True, padx=(50, 0))
+
+        self.btn_playlist = ctk.CTkButton(
+            self.filename_container, text="📜 List", width=66, height=26,
+            command=self.toggle_media_list,
+            fg_color=CREAM_DARK, hover_color=CREAM_MEDIUM,
+            text_color=BROWN_DARK,
+            corner_radius=8,
+            font=ctk.CTkFont(size=11)
+        )
+        self.btn_playlist.pack(side="right", padx=8)
+
+        # Playlist container
+        self.media_list_container = ctk.CTkScrollableFrame(
+            self.right_container, height=0,
+            label_text="Media Playlist",
+            fg_color=WARM_WHITE,
+            label_fg_color=CREAM_DARK,
+            label_text_color=BROWN_DARK,
+            scrollbar_button_color=BROWN_MID,
+            scrollbar_button_hover_color=BROWN_DARK,
+        )
+
+        # Progress bar
+        self.loading_progress = ctk.CTkProgressBar(
+            self.main_content,
+            width=400,
+            progress_color=BROWN_MID,
+            fg_color=CREAM_DARK,
+            corner_radius=4,
+            height=6,
+        )
+        self.loading_progress.pack(pady=(2, 4))
         self.loading_progress.set(0)
 
-        # Move playlist to a better place
-        self.media_list_container = ctk.CTkScrollableFrame(self.right_container, height=0, label_text="Project Media Playlist")
-        
-        self.loading_progress = ctk.CTkProgressBar(self.main_content, width=400)
-        self.loading_progress.pack(pady=5)
-        self.loading_progress.set(0)
-
+        # ── Navigation footer content ──────────────────────────────────────────
         self.nav_container = ctk.CTkFrame(self.footer, fg_color="transparent")
-        self.nav_container.pack(fill="x", expand=True, padx=20, pady=15)
+        self.nav_container.pack(fill="both", expand=True, padx=16, pady=10)
 
-        self.btn_back = ctk.CTkButton(self.nav_container, text="← BACK", command=self.on_back, width=120)
+        self.btn_back = ctk.CTkButton(
+            self.nav_container, text="← BACK", command=self.on_back,
+            width=130, height=42,
+            fg_color=CREAM_MEDIUM, hover_color=BROWN_LIGHT,
+            text_color=BROWN_DARK,
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            corner_radius=10
+        )
         self.btn_back.pack(side="left")
-        
-        self.stats_label = ctk.CTkLabel(self.nav_container, text="0 / 0 Images", font=ctk.CTkFont(size=16, weight="bold"))
+
+        self.stats_label = ctk.CTkLabel(
+            self.nav_container, text="0 / 0  Files",
+            font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold"),
+            text_color=BROWN_DARK
+        )
         self.stats_label.pack(side="left", expand=True)
-        
-        self.btn_next = ctk.CTkButton(self.nav_container, text="SKIP NEXT →", command=self.on_next, width=120)
+
+        self.btn_next = ctk.CTkButton(
+            self.nav_container, text="SKIP  →", command=self.on_next,
+            width=130, height=42,
+            fg_color=CREAM_MEDIUM, hover_color=BROWN_LIGHT,
+            text_color=BROWN_DARK,
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            corner_radius=10
+        )
         self.btn_next.pack(side="right")
+
+    # ── Sidebar helpers ────────────────────────────────────────────────────────
+
+    def _sidebar_divider(self):
+        frame = ctk.CTkFrame(self.sidebar, height=1, fg_color=BROWN_DARK)
+        frame.pack(fill="x", padx=14, pady=6)
+
+    def _sidebar_section_label(self, text, parent=None, pack=True):
+        lbl = ctk.CTkLabel(
+            parent or self.sidebar, text=text,
+            font=ctk.CTkFont(family="Segoe UI", size=10, weight="bold"),
+            text_color=TEXT_DIM_DARK
+        )
+        if pack:
+            lbl.pack(anchor="w", padx=18, pady=(2, 4))
+        return lbl
+
+    # ── UI logic ───────────────────────────────────────────────────────────────
 
     def connect_gdrive(self):
         url = self.gdrive_entry.get().strip()
         if not url: return
         
-        # Warning about potential slowness
         confirm = messagebox.askokcancel("GDrive Connection", 
-            "Menghubungkan ke Google Drive mungkin akan sedikit lambat karena aplikasi perlu mengakses folder publik dan menyiapkan sinkronisasi data. Lanjutkan?")
+            "Connecting to Google Drive may take a moment. The app will access the public folder and prepare the file list. Continue?")
         if not confirm:
             return
         
-        self.image_label.configure(text="Connecting to GDrive...")
+        self.image_label.configure(text="Connecting to GDrive…")
         def task():
             success, msg = self.manager.fetch_gdrive_files(url)
             self.after(0, lambda: self.finish_connect(success, msg))
@@ -409,11 +615,11 @@ class DataLabelerApp(ctk.CTk):
 
     def finish_connect(self, success, msg):
         if success:
-            messagebox.showinfo("Success", msg)
+            messagebox.showinfo("Connected", msg)
             self.refresh_app()
         else:
-            messagebox.showerror("Error", msg)
-            self.image_label.configure(text="Connection failed.")
+            messagebox.showerror("Connection Failed", msg)
+            self.image_label.configure(text="Connection failed. Please check the link and try again.")
 
     def select_source(self):
         folder = filedialog.askdirectory()
@@ -441,12 +647,12 @@ class DataLabelerApp(ctk.CTk):
             self.btn_toggle_sidebar.configure(text="☰")
         else:
             self.paned.forget(self.sidebar)
-            self.btn_toggle_sidebar.configure(text="❱") # Arrow pointing right when closed
+            self.btn_toggle_sidebar.configure(text="❱")
 
     def toggle_categories(self):
         self.cats_visible = not self.cats_visible
         if self.cats_visible:
-            self.category_scroll.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+            self.category_scroll.pack(fill="both", expand=True, padx=14, pady=(0, 10))
             self.btn_toggle_cat.configure(text="▼")
         else:
             self.category_scroll.pack_forget()
@@ -456,12 +662,30 @@ class DataLabelerApp(ctk.CTk):
         return filename.lower().endswith(('.mp4', '.avi', '.mov', '.mkv'))
 
     def create_category_buttons(self):
-        for widget in self.category_scroll.winfo_children(): widget.destroy()
+        for widget in self.category_scroll.winfo_children():
+            widget.destroy()
         if not self.manager.categories:
-            ctk.CTkLabel(self.category_scroll, text="No subfolders found", font=ctk.CTkFont(size=12, slant="italic")).pack(pady=20)
+            ctk.CTkLabel(
+                self.category_scroll,
+                text="No subfolders found",
+                font=ctk.CTkFont(size=12, slant="italic"),
+                text_color=TEXT_DIM_DARK
+            ).pack(pady=20)
             return
         for category in self.manager.categories:
-            ctk.CTkButton(self.category_scroll, text=category.upper(), height=50, command=lambda c=category: self.on_classify(c)).pack(fill="x", pady=5, padx=5)
+            ctk.CTkButton(
+                self.category_scroll,
+                text=category.upper(),
+                height=46,
+                command=lambda c=category: self.on_classify(c),
+                fg_color=BROWN_DARK,
+                hover_color=BROWN_MID,
+                text_color=TEXT_ON_DARK,
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                corner_radius=8,
+                border_width=1,
+                border_color=BROWN_MID,
+            ).pack(fill="x", pady=4, padx=4)
 
     def load_current_media(self):
         self.stop_video()
@@ -471,14 +695,13 @@ class DataLabelerApp(ctk.CTk):
         path_id, is_cloud, name = self.manager.get_current_image_data()
         total = len(self.manager.images)
         current = self.manager.current_index + 1 if total > 0 else 0
-        self.stats_label.configure(text=f"{current} / {total} Media Files")
+        self.stats_label.configure(text=f"{current} / {total}  Files")
         
         if path_id:
             self.loading_progress.set(0.3)
             def task():
                 try:
                     if is_cloud:
-                        # For videos in GDrive, we still try to get a thumbnail
                         thumb_url = f"https://drive.google.com/thumbnail?id={path_id}&sz=w1000"
                         response = requests.get(thumb_url, timeout=10)
                         img_data = ImageOps.exif_transpose(Image.open(io.BytesIO(response.content)))
@@ -486,7 +709,7 @@ class DataLabelerApp(ctk.CTk):
                     else:
                         if self.is_video_file(path_id):
                             if not HAS_FFMPEG:
-                                self.after(0, lambda: messagebox.showwarning("Logic Error", "Please install imageio-ffmpeg: pip install imageio-ffmpeg"))
+                                self.after(0, lambda: messagebox.showwarning("Missing Dependency", "Please install imageio-ffmpeg: pip install imageio-ffmpeg"))
                             self.after(0, lambda: self.start_video_playback(path_id, name))
                         else:
                             with Image.open(path_id) as img_temp:
@@ -497,7 +720,7 @@ class DataLabelerApp(ctk.CTk):
             
             Thread(target=task).start()
         else:
-            self.image_label.configure(image=None, text="Queue Empty")
+            self.image_label.configure(image=None, text="Queue empty — all done! 🎉")
             self.filename_label.configure(text="")
             self.loading_progress.set(0)
 
@@ -509,19 +732,14 @@ class DataLabelerApp(ctk.CTk):
             self.video_start_time = time.time() - (target_frame / self.fps)
             self.current_frame_idx = target_frame
             self.frame_queue.clear()
-        
-        # Audio seek is hard with winsound, so we just restart it or let it be
-        # For a professional feel, we just keep the sync logic handling it
 
     def toggle_media_list(self):
         self.media_list_visible = not self.media_list_visible
         if self.media_list_visible:
-            # Show between main content and footer
-            self.media_list_container.pack(fill="x", padx=20, pady=10, before=self.footer)
+            self.media_list_container.pack(fill="x", padx=18, pady=(0, 8), before=self.footer)
             self.media_list_container.configure(height=200)
             self.update_media_list()
         else:
-            # Hide
             self.media_list_container.pack_forget()
 
     def update_media_list(self):
@@ -530,11 +748,20 @@ class DataLabelerApp(ctk.CTk):
             
         for i, (fname, _, _) in enumerate(self.manager.images):
             is_current = (i == self.manager.current_index)
-            bg_color = "#1f538d" if is_current else "transparent"
-            btn = ctk.CTkButton(self.media_list_container, text=f"{i+1}. {fname}", 
-                                anchor="w", fg_color=bg_color, hover_color="#2b71ba",
-                                command=lambda idx=i: self.jump_to_media(idx))
-            btn.pack(fill="x", pady=2, padx=5)
+            bg_color = BROWN_MID if is_current else "transparent"
+            txt_color = TEXT_ON_DARK if is_current else BROWN_DARK
+            btn = ctk.CTkButton(
+                self.media_list_container,
+                text=f"{i+1}.  {fname}",
+                anchor="w",
+                fg_color=bg_color,
+                hover_color=BROWN_LIGHT,
+                text_color=txt_color,
+                font=ctk.CTkFont(size=11),
+                corner_radius=6,
+                command=lambda idx=i: self.jump_to_media(idx)
+            )
+            btn.pack(fill="x", pady=2, padx=4)
             
     def jump_to_media(self, index):
         self.manager.current_index = index
@@ -547,15 +774,12 @@ class DataLabelerApp(ctk.CTk):
         if self.video_paused:
             self.pause_start_time = time.time()
             self.btn_play_pause.configure(text="▶")
-            winsound.PlaySound(None, winsound.SND_PURGE) # Stop sound
+            winsound.PlaySound(None, winsound.SND_PURGE)
         else:
-            # Resume
             self.btn_play_pause.configure(text="⏸")
             drift = time.time() - self.pause_start_time
             self.video_start_time += drift
             if self.temp_audio_file:
-                # Restart sound from approx position? 
-                # Winsound can't seek, so we just play from start or keep it silent
                 winsound.PlaySound(self.temp_audio_file, winsound.SND_ASYNC | winsound.SND_LOOP)
             self.play_video_frame()
 
@@ -572,11 +796,9 @@ class DataLabelerApp(ctk.CTk):
         self.loading_progress.set(1)
         self.frame_queue.clear()
         
-        # Pre-determine target size with safe margins for footer
         ret, frame = self.current_video_cap.read()
         if ret:
             fh, fw, _ = frame.shape
-            # Calculate available space properly
             cw = self.right_container.winfo_width() - 40
             ch = self.right_container.winfo_height() - self.footer.winfo_height() - 150
             cw, ch = max(cw, 800), max(ch, 400)
@@ -587,7 +809,6 @@ class DataLabelerApp(ctk.CTk):
         else:
             self.vid_size = (800, 500)
 
-        # Handle Audio extraction and sync start
         if HAS_FFMPEG:
             def extract_and_play():
                 try:
@@ -599,15 +820,12 @@ class DataLabelerApp(ctk.CTk):
                     subprocess.run(cmd, capture_output=True, check=True)
                     
                     if self.video_playing:
-                        # AUDIO START POINT
                         winsound.PlaySound(self.temp_audio_file, winsound.SND_ASYNC | winsound.SND_LOOP)
                         self.video_start_time = time.time()
                         self.current_frame_idx = 0
-                        # Start video playback
                         self.after(0, self.play_video_frame)
                 except Exception as e:
                     print(f"Audio Error: {e}")
-                    # Fallback to no audio video start
                     self.video_start_time = time.time()
                     self.after(0, self.play_video_frame)
 
@@ -616,7 +834,6 @@ class DataLabelerApp(ctk.CTk):
             self.video_start_time = time.time()
             self.play_video_frame()
 
-        # Start reading frames in background thread
         def reader():
             while self.video_playing:
                 if self.video_paused:
@@ -626,7 +843,6 @@ class DataLabelerApp(ctk.CTk):
                 with self.cap_lock:
                     if not self.current_video_cap: break
                     
-                    # SYNC CHECK: Only jump if MORE than 60 frames behind
                     if self.video_start_time > 0:
                         elapsed = time.time() - self.video_start_time
                         target_frame = int(elapsed * self.fps)
@@ -638,18 +854,15 @@ class DataLabelerApp(ctk.CTk):
                     ret, frame = self.current_video_cap.read()
                 
                 if not ret:
-                    # Video finished
                     self.video_playing = False
                     self.after(0, self.stop_video)
                     self.after(0, lambda: self.btn_play_pause.configure(text="▶"))
                     break
                 
-                # Resizing and converting
                 frame = cv2.resize(frame, self.vid_size, interpolation=cv2.INTER_NEAREST)
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 img = Image.fromarray(frame)
                 
-                # Push to queue (low latency mode)
                 self.frame_queue.append(img)
                 time.sleep(max(0.001, 1/self.fps * 0.4))
 
@@ -667,12 +880,10 @@ class DataLabelerApp(ctk.CTk):
         elapsed = time.time() - self.video_start_time
         target_frame = int(elapsed * self.fps)
         
-        # Update Slider
         if self.total_frames > 0:
             progress = (min(self.current_frame_idx, self.total_frames) / self.total_frames) * 100
             self.video_slider.set(progress)
 
-        # Drop/Sync
         while len(self.frame_queue) > 1 and self.current_frame_idx < target_frame:
             self.frame_queue.popleft()
             self.current_frame_idx += 1
@@ -685,7 +896,6 @@ class DataLabelerApp(ctk.CTk):
             self.image_label._label.configure(image=self.tk_img)
             self.image_label._label.image = self.tk_img
         
-        # Scheduling
         next_target_time = (self.current_frame_idx + 1) / self.fps
         current_elapsed = time.time() - self.video_start_time
         delay = int(max(1, (next_target_time - current_elapsed) * 1000))
@@ -694,7 +904,6 @@ class DataLabelerApp(ctk.CTk):
 
     def display_image(self, img_data, name):
         w, h = img_data.size
-        # Calculate available space properly (window size - footer - margins)
         try:
             cw = self.right_container.winfo_width() - 40
             ch = self.right_container.winfo_height() - self.footer.winfo_height() - 150
@@ -716,23 +925,24 @@ class DataLabelerApp(ctk.CTk):
         self.load_current_media()
 
     def on_classify(self, category):
-        self.image_label.configure(text="Processing...")
+        self.image_label.configure(text="Processing…")
         def task():
             success, msg = self.manager.move_or_download_to_category(category)
             self.after(0, lambda: self.finish_action(success, msg))
         Thread(target=task).start()
 
     def finish_action(self, success, msg):
-        if not success: messagebox.showerror("Error", msg)
+        if not success: messagebox.showerror("Error", f"Failed to move file:\n{msg}")
         self.load_current_media()
 
     def on_next(self):
         if self.manager.next_image(): self.load_current_media()
-        else: messagebox.showinfo("End", "No more media.")
+        else: messagebox.showinfo("End of Queue", "No more media files to label.")
 
     def on_back(self):
         if self.manager.prev_image(): self.load_current_media()
-        else: messagebox.showinfo("Start", "First image.")
+        else: messagebox.showinfo("Start of Queue", "This is already the first file.")
+
 
 if __name__ == "__main__":
     app = DataLabelerApp()
